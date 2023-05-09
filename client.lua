@@ -32,6 +32,53 @@ local function printServerTable(keyword)
 		end
 	end
 end
+local function linput(input) --input
+    local address,port,_=table.unpack(serverMap[localConnected])
+	--check if disconnected
+	modem.send(address,port,"disconnected?")
+	local _,_,from,port2,_,msg=event.pull(timeout,"modem")
+	if msg=="n" then
+		--ok
+	elseif msg=="busy" or msg=="y" or from~=address then
+		--disconnected
+		print("Disconnected")
+		localConnected=nil
+		return false
+	else
+		print("Unknown error occured. Disconnected")
+		localConnected=nil
+		return false
+	end
+	--now, send the input. if not received, send again
+	local chks=false
+	local try=0 --counter, if try==5, disconnect
+	while not chks do
+		--check current try
+		if try==5 then --disconnect
+			print("Server timeouted.")
+			localConnected=nil
+			return false
+		end
+		--send
+		modem.send(address, port,"input",input)
+		--wait for confirm
+		local _,_,from,_,_,msg=event.pull(timeout,"modem")
+		if not from then 
+			--timeout
+			try=try+1
+		elseif from~=address then
+			--interrupted
+			try=try+1
+		elseif msg~="received" then
+			--uhh, error?
+			try=try+1
+		else
+			--all good
+			chks=false
+			return true
+		end
+	end
+end
 local function connection()
 	local exitc=false
 	local timeoutchk=0
@@ -51,6 +98,7 @@ local function connection()
 			timeoutchk=0
 			if ltype=="exit" then
 				print("Disconnected.")
+				localConnected=nil
 				exitc=true
 			elseif ltype=="clear" then
 				term.clear()
@@ -63,15 +111,11 @@ local function connection()
 			elseif ltype=="input" then
 				if msg then term.write(msg) end
 				local inputc=io.read()
-				--check if disconnected
-				modem.send(address,port,"disconnected?")
-				local _,_,from,port2,_,msg=event.pull(timeout,"modem")
-				if msg=="busy" or msg=="y" or from~=address then
-					--disconnected
-					print("Disconnected")
+				local chkli=linput(inputc)
+				if not chkli then 
+					--if input failed
 					exitc=true
-					localConnected=nil
-				else modem.send(address,port,inputc) end
+				end
 			else
 				print("Invalid request received")
 			end
@@ -145,7 +189,7 @@ if not modem.isWireless() then error("Wireless modem required") end
 os.sleep(0.5)
 term.clear()
 computer.beep()
-print("MCNet Client Software v1.0")
+print("MCNet Client Software v1.1")
 print("Your computer address is: "..component.getPrimary("modem")["address"])
 print("Your signal strength is: "..modem.getStrength())
 print("--------------------------")
@@ -158,6 +202,7 @@ print("Choose connection type. (type help for info)")
 		print("local = connect to local server")
 		print("server = connect to local node")
 		print("direct = connect directly to server using linked cards")
+		print("exit - to exit program")
 	elseif input1=="test" then
 		--test section
 	elseif input1=="local" then
@@ -183,6 +228,9 @@ print("Choose connection type. (type help for info)")
 	elseif input1=="direct" then
 		exit1=true
 		contype=input1
+	elseif input1=="exit" then
+		exit1=true
+		contype="exit"
 	else
 		print("Unknown value. Type help for info.")
 	end
@@ -193,29 +241,34 @@ if contype=="none" then
 	print("Internal error occured: contype=none")
 	print("Please restart")
 	error("Internal error")
+elseif contype=="exit" then
 elseif contype=="test" then
 	error("Test here.")
 elseif contype=="local" then
-	while not localConnected do
-		term.clear()
-		print("Local connection menu")
-		print("Enter a name of server to connect")
-		printServerTable("local")
-		print(" ")
-		local input2=io.read()
-		if input2=="exit" then
-			localConnected="exit"
-			print("Exiting...")
-			break
-		else
-			local chk2=local_connect(input2)
-			if chk2==false then print("Connection failed") os.sleep(2) end 
+	local mainloop=true
+	while mainloop do
+		while not localConnected do
+			term.clear()
+			print("Local connection menu")
+			print("Enter a name of server to connect")
+			printServerTable("local")
+			print(" ")
+			local input2=io.read()
+			if input2=="exit" then
+				localConnected="exit"
+				print("Exiting...")
+				mainloop=false
+				os.sleep(1)
+				break
+			else
+				local chk2=local_connect(input2)
+				if chk2==false then print("Connection failed") os.sleep(2) end 
+			end
 		end
-	end
-	--connect or exit
-	if localConnected=="exit" then
-	else
+		--connect or exit
+		print("----------------")
 		connection()
+		os.sleep(1)
 	end
 end
 print("Exited")
